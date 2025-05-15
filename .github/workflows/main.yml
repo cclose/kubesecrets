@@ -1,0 +1,86 @@
+name: Main Branch CI
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  tag-and-changelog:
+    name: Generate Tag and Update Changelog
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get Latest Tag
+        id: get_tag
+        run: |
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          echo "Latest tag: $LATEST_TAG"
+          echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+
+      - name: Determine Bump Level from Commit Messages
+        id: bump_level
+        run: |
+          COMMITS=$(git log ${{ steps.get_tag.outputs.tag }}..HEAD --pretty=format:"%s")
+          echo "$COMMITS" > commits.txt
+
+          if grep -q '\[semver:skip\]' commits.txt; then
+            echo "Skipping version bump." && exit 0
+          elif grep -q '\[semver:major\]' commits.txt; then
+            echo "bump=major" >> $GITHUB_OUTPUT
+          elif grep -q '\[semver:minor\]' commits.txt; then
+            echo "bump=minor" >> $GITHUB_OUTPUT
+          else
+            echo "bump=patch" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Bump Version Accordingly
+        id: bump
+        run: |
+          if [ -z "${{ steps.bump_level.outputs.bump }}" ]; then
+            echo "No version bump requested. Exiting."
+            exit 0
+          fi
+
+          OLD_TAG=${{ steps.get_tag.outputs.tag }}
+          OLD_VER=${OLD_TAG#v}
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$OLD_VER"
+
+          case "${{ steps.bump_level.outputs.bump }}" in
+            major)
+              NEW_TAG="v$((MAJOR + 1)).0.0"
+              ;;
+            minor)
+              NEW_TAG="v$MAJOR.$((MINOR + 1)).0"
+              ;;
+            patch|*)
+              NEW_TAG="v$MAJOR.$MINOR.$((PATCH + 1))"
+              ;;
+          esac
+
+          echo "new_tag=$NEW_TAG" >> $GITHUB_OUTPUT
+
+      - name: Update CHANGELOG.md
+        if: steps.bump.outputs.new_tag != ''
+        run: |
+          echo "## ${{ steps.bump.outputs.new_tag }} - $(date +'%Y-%m-%d')" | cat - CHANGELOG.md > TEMP && mv TEMP CHANGELOG.md
+          git add CHANGELOG.md
+          git commit -m "chore: update CHANGELOG for ${{ steps.bump.outputs.new_tag }}"
+
+      - name: Create Tag
+        if: steps.bump.outputs.new_tag != ''
+        run: |
+          git tag ${{ steps.bump.outputs.new_tag }}
+          git push origin main --follow-tags
+
+      - name: Push Tag
+        if: steps.bump.outputs.new_tag != ''
+        run: |
+          git push origin ${{ steps.bump.outputs.new_tag }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,87 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    name: Create Release and Publish Artifacts
+    runs-on: ubuntu-latest
+
+    env:
+      ARTIFACT_DIR: dist
+      ARCHIVE_PATH: dist/kubesecrets.tar.gz
+
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+
+      - name: Prepare Files
+        run: |
+          mkdir -p $ARTIFACT_DIR/kubesecrets
+          cp kubesecrets $ARTIFACT_DIR/kubesecrets/
+          tar -czf $ARCHIVE_PATH -C $ARTIFACT_DIR kubesecrets
+
+      - name: Generate Checksum
+        run: |
+          sha256sum $ARCHIVE_PATH > $ARTIFACT_DIR/sha256sum.txt
+          echo "SHA256=$(cut -d ' ' -f1 $ARTIFACT_DIR/sha256sum.txt)" >> $GITHUB_ENV
+
+      - name: Extract Release Notes
+        id: changelog
+        uses: mikeal/changelog-parser@v1
+        with:
+          path: ./CHANGELOG.md
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.PAT }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: "kubesecrets ${{ github.ref_name }}"
+          draft: false
+          prerelease: false
+          body: ${{ steps.changelog.outputs.latest }}
+
+      - name: Upload Archive
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.PAT }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ${{ env.ARCHIVE_PATH }}
+          asset_name: kubesecrets.tar.gz
+          asset_content_type: application/octet-stream
+
+      - name: Upload Checksum
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.PAT }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ${{ env.ARTIFACT_DIR }}/sha256sum.txt
+          asset_name: sha256sum.txt
+          asset_content_type: text/plain
+
+      - name: Update Homebrew Tap
+        run: |
+          git clone https://github.com/cclose/homebrew-tap.git
+          cd homebrew-tap
+
+          FORMULA_PATH=Formula/kubesecrets.rb
+          TAG_VERSION="${{ github.ref_name }}"
+
+          sed -i "" "s|^  url \".*\"|  url \"https://github.com/cclose/kubesecrets/archive/refs/tags/${TAG_VERSION}.tar.gz\"|" $FORMULA_PATH
+          sed -i "" "s|^  sha256 \".*\"|  sha256 \"${SHA256}\"|" $FORMULA_PATH
+          sed -i "" "s|^  version \".*\"|  version \"${TAG_VERSION}\"|" $FORMULA_PATH || true
+
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git commit -am "Update kubesecrets formula to ${TAG_VERSION}"
+          git push
+        env:
+          GITHUB_TOKEN: ${{ secrets.PAT }}
