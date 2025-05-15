@@ -1,0 +1,40 @@
+name: Finalize Release
+
+on:
+  pull_request:
+    types: [closed]
+
+jobs:
+  finalize:
+    if: >-
+      github.event.pull_request.merged == true &&
+      startsWith(github.event.pull_request.head.ref, 'release/')
+    runs-on: ubuntu-latest
+    name: Tag Release and Trigger Publish
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Extract Tag from Branch Name
+        id: tag
+        run: |
+          REF_NAME="${{ github.event.pull_request.head.ref }}"
+          VERSION=${REF_NAME#release/}
+          echo "VERSION=$VERSION"
+          echo "tag=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+
+      - name: Tag the Release
+        run: |
+          git tag ${{ steps.tag.outputs.tag }}
+          git push origin ${{ steps.tag.outputs.tag }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }}

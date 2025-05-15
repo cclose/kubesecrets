@@ -1,0 +1,60 @@
+name: PR Quality Check
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+jobs:
+  changelog-sanity:
+    name: Validate PR Title for Changelog
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Extract Semver Tag from Title
+        id: semver_check
+        run: |
+          TITLE="${{ github.event.pull_request.title }}"
+          echo "PR title: $TITLE"
+          SEMVER="patch"
+
+          if [[ "$TITLE" =~ \[semver:major\] ]]; then
+            SEMVER="major"
+          elif [[ "$TITLE" =~ \[semver:minor\] ]]; then
+            SEMVER="minor"
+          elif [[ "$TITLE" =~ \[semver:skip\] ]]; then
+            SEMVER="skip"
+          fi
+
+          echo "semver=$SEMVER" >> $GITHUB_OUTPUT
+
+      - name: Comment on PR with bump level
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const level = '${{ steps.semver_check.outputs.semver }}';
+            const prNumber = context.payload.pull_request.number;
+            const message = `🔖 This PR is tagged as a **${level}** version bump.`;
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body: message
+            });
+
+  description-check:
+    name: Validate PR Body
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Ensure PR Description Is Present
+        run: |
+          BODY="${{ github.event.pull_request.body }}"
+          echo "PR body: $BODY"
+          if [[ -z "$BODY" || "$BODY" =~ ^\s*$ ]]; then
+            echo "❌ PR must include a description to aid changelog generation."
+            exit 1
+          else
+            echo "✅ PR body is present."
+          fi
