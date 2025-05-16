@@ -31,9 +31,7 @@ jobs:
 
       - name: Extract Release Notes
         id: changelog
-        uses: mikeal/changelog-parser@v1
-        with:
-          path: ./CHANGELOG.md
+        uses: coditory/changelog-parser@v1
 
       - name: Create Release
         id: create_release
@@ -45,7 +43,7 @@ jobs:
           release_name: "kubesecrets ${{ github.ref_name }}"
           draft: false
           prerelease: false
-          body: ${{ steps.changelog.outputs.latest }}
+          body: ${{ steps.changelog.outputs.description }}
 
       - name: Upload Archive
         uses: actions/upload-release-asset@v1
